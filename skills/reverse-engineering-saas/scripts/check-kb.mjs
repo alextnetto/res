@@ -3,7 +3,7 @@
 // evidence tags, the change ledger and STATUS.md.
 // Exit code 1 when there are errors, 2 on bad usage.
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { dirname, join, relative, resolve } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 
 const USAGE = 'Usage: node check-kb.mjs <kb-dir> [--closing] [--next] [--help]';
 const ID_PATTERN = /\b(FL|SRC|EV|BR|F|S|C|R|E|B|Q|L)-(\d{3})\b/g;
@@ -46,7 +46,7 @@ function walk(dir, root = dir) {
     if (SKIP_DIRS.has(entry)) continue;
     const full = join(dir, entry);
     if (statSync(full).isDirectory()) files.push(...walk(full, root));
-    else files.push(relative(root, full));
+    else files.push(relative(root, full).split(sep).join('/'));
   }
   return files;
 }

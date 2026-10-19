@@ -9,6 +9,8 @@ import { fileURLToPath } from 'node:url';
 
 const scripts = join(dirname(fileURLToPath(import.meta.url)), '..', 'skills', 'reverse-engineering-saas', 'scripts');
 const run = (name, ...args) => spawnSync(process.execPath, [join(scripts, name), ...args], { encoding: 'utf8' });
+// Windows installs Python as python, not python3.
+const python = process.platform === 'win32' ? 'python' : 'python3';
 
 let dir;
 let kb;
@@ -218,7 +220,7 @@ test('init-kb defaults to ./re-<product-slug>', () => {
 // Lists and verifies a zip with Python's zipfile, an independent implementation.
 const readZip = (file) => {
   const code = 'import json,sys,zipfile\nz=zipfile.ZipFile(sys.argv[1])\nprint(json.dumps({"bad": z.testzip(), "names": z.namelist(), "build": z.read([n for n in z.namelist() if n.endswith("/BUILD.md")][0]).decode()}))';
-  const result = spawnSync('python3', ['-c', code, file], { encoding: 'utf8' });
+  const result = spawnSync(python, ['-c', code, file], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
   return JSON.parse(result.stdout);
 };
@@ -255,7 +257,7 @@ test('an unzipped handoff passes check-kb --closing; its ledger has no IDs, loca
   assert.equal(packed.status, 0, packed.stdout + packed.stderr);
   assert.match(packed.stdout, /Kept sandbox\/ledger\.csv without object IDs/);
   const target = join(dir, 'unzipped');
-  const unzip = spawnSync('python3', ['-c', 'import sys,zipfile\nzipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])', out, target], { encoding: 'utf8' });
+  const unzip = spawnSync(python, ['-c', 'import sys,zipfile\nzipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])', out, target], { encoding: 'utf8' });
   assert.equal(unzip.status, 0, unzip.stderr);
 
   const ledger = readFileSync(join(target, 're-acme', 'sandbox', 'ledger.csv'), 'utf8');
