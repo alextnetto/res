@@ -90,6 +90,10 @@ node skills/reverse-engineering-saas/scripts/build-report.mjs re-acme-crm
 ```
 
 ```bash
+node skills/reverse-engineering-saas/scripts/triage-kb.mjs re-acme-crm
+```
+
+```bash
 node skills/reverse-engineering-saas/scripts/pack-kb.mjs re-acme-crm
 ```
 

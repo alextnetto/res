@@ -167,20 +167,37 @@ function checkReferencesAndLinks(kb, files) {
   }
 }
 
-// Rules and barriers are claims the clone depends on: each section needs evidence.
+// Sections that start with a "PREFIX-###" heading and end at the next heading of the same or a higher level.
+function claimSections(text, prefix) {
+  const sections = [];
+  let current = null;
+  for (const line of text.split('\n')) {
+    const heading = line.match(/^(#{1,6})\s/);
+    if (heading && current && heading[1].length <= current.level) current = null;
+    const own = line.match(new RegExp(`^(#{1,6})\\s+(${prefix}-\\d{3})\\b`));
+    if (own) sections.push((current = { id: own[2], level: own[1].length, lines: [] }));
+    current?.lines.push(line);
+  }
+  return sections.map(({ id, lines }) => [id, lines.join('\n')]);
+}
+
+// Rules, barriers and findings are claims the clone depends on: each needs evidence.
+// A finding may have a summary row and a detail heading; they are checked together.
 function checkEvidenceSections(kb, files) {
   const targets = [
     ...files.filter((name) => name.startsWith('rules/') && name.endsWith('.md')).map((file) => [file, 'R']),
     ...files.filter((name) => name === 'clone/barriers.md').map((file) => [file, 'BR']),
+    ...files.filter((name) => name === 'findings.md').map((file) => [file, 'B']),
   ];
   for (const [file, prefix] of targets) {
     const text = stripIgnored(readFileSync(join(kb, file), 'utf8'));
-    const start = new RegExp(`^(?=#{1,6}\\s+${prefix}-\\d{3}\\b)`, 'm');
-    const sections = text.split(start).filter((section) => new RegExp(`^#{1,6}\\s+${prefix}-\\d{3}`).test(section));
-    for (const section of sections) {
-      const id = section.match(new RegExp(`${prefix}-\\d{3}`))[0];
-      if (/\[(obs|net)\s+EV-\d{3}|\[doc\s+SRC-\d{3}/.test(section)) continue;
-      if (/\[inf\]/.test(section) && /\bQ-\d{3}\b/.test(section)) warnings.push(`${file}: ${id} rests on inference only`);
+    const claims = new Map();
+    const add = (id, claim) => claims.set(id, `${claims.get(id) ?? ''}\n${claim}`);
+    for (const [id, section] of claimSections(text, prefix)) add(id, section);
+    if (prefix === 'B') for (const row of text.split('\n').filter((line) => /^\|\s*B-\d{3}\b/.test(line))) add(row.match(/B-\d{3}/)[0], row);
+    for (const [id, claim] of claims) {
+      if (/\[(obs|net)\s+EV-\d{3}|\[doc\s+SRC-\d{3}/.test(claim)) continue;
+      if (/\[inf\]/.test(claim) && /\bQ-\d{3}\b/.test(claim)) warnings.push(`${file}: ${id} rests on inference only`);
       else errors.push(`${file}: ${id} has no evidence tag ([obs EV-###], [net EV-###] or [doc SRC-###])`);
     }
   }

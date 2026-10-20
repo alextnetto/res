@@ -142,11 +142,25 @@ Initialize the KB as its own git repository (`init-kb.mjs --git`), even inside a
 
 Send the zip to the user in the chat. The receiver unzips it and gives the folder to a coding agent, starting from `BUILD.md`.
 
+## Triage
+
+`node <skill>/scripts/triage-kb.mjs <kb>` turns a finished KB into issue drafts for the clone's tracker. It writes `<kb>-triage-<date>/` next to the KB folder:
+
+- `TRIAGE.md`: summary, barriers, problems with their decisions, open questions, and how to file.
+- `issues/`: one draft per barrier, and one per problem that has an Avoid, Improve or Copy row in `clone/implications.md`. A problem with no decision gets no draft; the report lists it as needing one.
+- `issues.json`: `id`, `title` and `file` of each draft: barriers first, then problems, each most severe first.
+
+It runs `check-kb` first and stops on errors (`--force` triages anyway and says so). It never overwrites: if the output folder exists it stops, so pass `--out <dir>` for another one. It never touches the network and files nothing. Read the drafts, then file them from the triage folder, with the clone's repository as `owner/repo`:
+
+```bash
+jq -r '.[] | [.title, .file] | @tsv' issues.json | while IFS=$'\t' read -r title file; do gh issue create -R owner/repo --title "$title" --body-file "$file"; done
+```
+
 ## Checks
 
 `node <skill>/scripts/check-kb.mjs <kb>` reports:
 
-- Errors: unresolved references, duplicate definitions, rules or barriers without evidence, invalid ledger rows, `fixture`, `kept`, `human` or `incident` rows without a note, missing `STATUS.md`; with `--closing`, an unfilled charter.
+- Errors: unresolved references, duplicate definitions, rules, barriers or findings without evidence, invalid ledger rows, `fixture`, `kept`, `human` or `incident` rows without a note, missing `STATUS.md`; with `--closing`, an unfilled charter.
 - Warnings: open ledger rows, `[inf]` lines without `Q-###`, features without a coverage row, artifact files without a "Not tested" section, entity field rows without an evidence tag, evidence files missing from `evidence/index.csv`, `STATUS.md` older than the newest log, template placeholders left in place.
 
 Add `--closing` at the end of the study: `open`, `fixture` and `human` ledger rows become errors.
