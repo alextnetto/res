@@ -1,7 +1,7 @@
-// Tests for init-kb.mjs and check-kb.mjs. No dependencies.
+// Tests for init-kb.mjs, check-kb.mjs and triage-kb.mjs. No dependencies.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
@@ -157,6 +157,88 @@ test('a finding is checked with its row and heading together, never with Strengt
   assert.equal(result.status, 1);
   assert.doesNotMatch(result.stdout, /B-001 has no evidence tag/);
   assert.match(result.stdout, /findings\.md: B-002 has no evidence tag/);
+});
+
+const triage = (...args) => run('triage-kb.mjs', kb, ...args);
+
+test('triage-kb writes a report and drafts for barriers and decided findings', () => {
+  appendFileSync(join(kb, 'clone/barriers.md'), '\n### BR-001 Gmail scopes need a yearly review\n- Severity: blocks feature\n- Evidence: [doc SRC-001]\n\n### BR-002 LGPD processor duties\n- Severity: blocks launch\n- Evidence: [doc SRC-001]\n');
+  appendFileSync(join(kb, 'sources.md'), '| SRC-001 | Docs | https://example.com | docs | 2026-10-16 | terms |\n');
+  write('findings.md', '# Findings\n\n| ID | Finding | Severity | Where | Evidence |\n|---|---|---|---|---|\n| B-001 | View changes are lost on reload | Medium | Board | [obs EV-001] |\n| B-002 | Escape closes the whole task | Low | Task | [inf] Q-001 |\n| B-003 | Toolbar covers the title | Low | Toolbar | [obs EV-001] |\n');
+  write('questions.md', '# Open questions\n\n| ID | Question | Why it matters | How to answer | Status |\n|---|---|---|---|---|\n| Q-001 | Does Escape close the input first? | UX | Press it | open |\n| Q-002 | Old question | n/a | n/a | answered |\n');
+  write('clone/implications.md', '# Implications\n\n## Avoid\n\n| Area | Item | Why | Refs |\n|---|---|---|---|\n| Board | Dropping view drafts | Lost work | B-001 |\n\n## Improve\n\n| Area | Item | How | Refs |\n|---|---|---|---|\n| Task view | Escape | Close the input first | B-002 |\n');
+  appendFileSync(join(kb, 'evidence/index.csv'), 'EV-001,2026-10-15,s01,/board,Board,yes\n');
+  write('evidence/EV-001-board.md', 'Board\n');
+  const out = join(dir, 'triage');
+  const result = triage('--out', out);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  const index = JSON.parse(readFileSync(join(out, 'issues.json'), 'utf8'));
+  assert.deepEqual(index.map((item) => item.id), ['BR-002', 'BR-001', 'B-001', 'B-002']);
+  assert.deepEqual(index[0], { id: 'BR-002', title: 'BR-002 LGPD processor duties', file: 'issues/BR-002.md' });
+  assert.ok(!existsSync(join(out, 'issues/B-003.md')));
+  assert.match(readFileSync(join(out, 'issues/BR-002.md'), 'utf8'), /^- Severity: blocks launch/);
+  assert.match(readFileSync(join(out, 'issues/B-001.md'), 'utf8'), /^- Severity: Medium\n- Where: Board\n- Evidence: \[obs EV-001\], seen 2026-10-15\n/);
+  assert.match(readFileSync(join(out, 'issues/B-001.md'), 'utf8'), /- Avoid: Dropping view drafts\. Why: Lost work\. Refs: B-001/);
+  assert.match(readFileSync(join(out, 'issues/B-002.md'), 'utf8'), /- Evidence: inferred only\. Answer Q-001 before acting on it\./);
+  const report = readFileSync(join(out, 'TRIAGE.md'), 'utf8');
+  assert.match(report, /\| B-003 \| Toolbar covers the title \| Low \| confirmed \| none \| - \|/);
+  assert.match(report, /\| Q-001 \| Does Escape close the input first\? \| Press it \|/);
+  assert.doesNotMatch(report, /Q-002/);
+  assert.match(result.stdout, /Drafts: 4 \(barriers 2, problems 2\)\.\nProblems without a decision: 1 \(B-003\)\.\nOpen questions: 1\./);
+  assert.match(result.stdout, /Nothing was filed/);
+});
+
+test('triage-kb merges a finding defined by a summary row and a detail heading', () => {
+  write('findings.md', '# Findings\n\n| ID | Finding | Severity | Where | Evidence |\n|---|---|---|---|---|\n| B-001 | Lost on reload | Medium | Board | [inf] Q-001 |\n\n### B-001 Lost on reload\n- Seen again after a reload [obs EV-001]\n');
+  write('questions.md', '# Open questions\n\n| ID | Question | Why it matters | How to answer | Status |\n|---|---|---|---|---|\n| Q-001 | Always? | UX | Reload twice | open |\n');
+  write('clone/implications.md', '# Implications\n\n## Avoid\n\n| Area | Item | Why | Refs |\n|---|---|---|---|\n| Board | Dropping drafts | Lost work | B-001 |\n');
+  appendFileSync(join(kb, 'evidence/index.csv'), 'EV-001,2026-10-15,s01,/board,Board,yes\n');
+  write('evidence/EV-001-board.md', 'Board\n');
+  const out = join(dir, 'triage');
+  const result = triage('--out', out);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.deepEqual(JSON.parse(readFileSync(join(out, 'issues.json'), 'utf8')).map((item) => item.id), ['B-001']);
+  assert.match(readFileSync(join(out, 'issues/B-001.md'), 'utf8'), /- Severity: Medium\n- Where: Board\n- Evidence: \[obs EV-001\], seen 2026-10-15/);
+});
+
+test('triage-kb reads Windows line endings, IDs with titles, heading questions and finding details', () => {
+  write('clone/barriers.md', '# Production barriers\r\n\r\n### BR-001 LGPD processor duties\r\n- Severity: blocks launch\r\n- Evidence: [doc SRC-001]\r\n');
+  appendFileSync(join(kb, 'sources.md'), '| SRC-001 | Docs | https://example.com | docs | 2026-10-16 | terms |\n');
+  write('findings.md', '# Findings\n\n| Finding | Severity | Where | Evidence |\n|---|---|---|---|\n| B-001 View changes are lost on reload | Medium | Board | [obs EV-001] |\n\n### B-002 Escape closes the task\n- Severity: Low\n- Where: Task view\n- Steps: open a task, press Escape [obs EV-001]\n\n## Strengths\n\n- None recorded yet.\n');
+  write('questions.md', '# Open questions\n\n### Q-001 Does Escape close the input first?\n- How to answer: press it in an empty input\n- Status: open\n');
+  write('clone/implications.md', '# Implications\n\n## Avoid\n\n| Area | Item | Why | Refs |\n|---|---|---|---|\n| Board | Dropping view drafts | Lost work | B-001 |\n| Task view | Escape closing the task | Lost context | B-002 |\n');
+  appendFileSync(join(kb, 'evidence/index.csv'), 'EV-001,2026-10-15,s01,/board,Board,yes\n');
+  write('evidence/EV-001-board.md', 'Board\n');
+  const out = join(dir, 'triage');
+  const result = triage('--out', out);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  const index = JSON.parse(readFileSync(join(out, 'issues.json'), 'utf8'));
+  assert.deepEqual(index.map((item) => item.title), ['BR-001 LGPD processor duties', 'B-001 View changes are lost on reload', 'B-002 Escape closes the task']);
+  const draft = readFileSync(join(out, 'issues/B-002.md'), 'utf8');
+  assert.match(draft, /^- Severity: Low\n- Where: Task view\n- Evidence: \[obs EV-001\], seen 2026-10-15\n\n- Steps: open a task, press Escape \[obs EV-001\]\n/);
+  assert.equal(draft.match(/Severity/g).length, 1);
+  assert.match(readFileSync(join(out, 'TRIAGE.md'), 'utf8'), /\| Q-001 \| Does Escape close the input first\? \| press it in an empty input \|/);
+});
+
+test('triage-kb never overwrites and refuses a KB with errors unless --force', () => {
+  const out = join(dir, 'taken');
+  mkdirSync(out);
+  let result = triage('--out', out);
+  assert.equal(result.status, 2);
+  assert.deepEqual(readdirSync(out), []);
+  appendFileSync(join(kb, 'findings.md'), '\n| B-001 | Lost on reload | Medium | Board | |\n');
+  const fresh = join(dir, 'fresh');
+  result = triage('--out', fresh);
+  assert.equal(result.status, 1);
+  assert.ok(!existsSync(fresh));
+  result = triage('--out', fresh, '--force');
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Triaged with --force: check-kb reported errors\./);
+  appendFileSync(join(kb, 'clone/barriers.md'), '\n### BR-001 First\n- Severity: moat\n\n### BR-001 Second\n- Severity: moat\n');
+  result = triage('--out', join(dir, 'duplicates'), '--force');
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Skipped second definitions of: BR-001\./);
+  assert.match(readFileSync(join(dir, 'duplicates', 'issues', 'BR-001.md'), 'utf8'), /^- Severity: moat\n/);
 });
 
 test('entity field rows need an evidence tag', () => {
