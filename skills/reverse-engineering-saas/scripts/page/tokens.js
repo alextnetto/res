@@ -1,7 +1,7 @@
 // tokens.js: design tokens in use on the page.
 // Paste the whole file into the browser's JavaScript tool. The value of the
 // last expression is the result.
-//   window.__re.tokens({ root: '.selector' })  limits the frequency count to a subtree
+//   window.__re.tokens({ root: '.selector' })  resolves variables and counts styles in a subtree
 //   window.__re.tokens.element('.selector')    computed style of one element (use for hover/focus states)
 // Playwright browser_evaluate: wrap as () => { <file>; return window.__re.last; }
 (() => {
@@ -61,12 +61,12 @@
 
   // Resolves a color expression to the browser's computed rgb() form.
   const probe = document.createElement('span');
-  const resolveColor = (expression) => {
+  const resolveColor = (expression, root) => {
     // var() always passes CSS.supports, and resolves to the inherited color when invalid.
     if (!expression || expression.includes('var(') || !CSS.supports('color', expression)) return null;
     probe.style.color = '';
     probe.style.color = expression;
-    document.body.appendChild(probe);
+    root.appendChild(probe);
     const value = getComputedStyle(probe).color;
     probe.remove();
     return value;
@@ -79,14 +79,14 @@
     const maxVariables = options.maxVariables || 300;
 
     const { declared, unreadable } = collectDeclaredVariables();
-    const rootStyle = getComputedStyle(document.documentElement);
+    const rootStyle = getComputedStyle(root);
     for (let i = 0; i < rootStyle.length; i += 1) {
       const name = rootStyle[i];
-      if (name.startsWith('--') && !declared[name]) declared[name] = [{ selector: '(computed on :root)', value: rootStyle.getPropertyValue(name).trim() }];
+      if (name.startsWith('--') && !declared[name]) declared[name] = [{ selector: '(computed on scope)', value: rootStyle.getPropertyValue(name).trim() }];
     }
     const variables = Object.entries(declared).map(([name, declarations]) => {
-      const resolved = rootStyle.getPropertyValue(name).trim() || declarations[0].value;
-      return { name, resolved, color: resolveColor(resolved), declarations: declarations.slice(0, 4) };
+      const resolved = rootStyle.getPropertyValue(name).trim();
+      return { name, resolved, color: resolveColor(resolved, root), declarations: declarations.slice(0, 4) };
     });
     const variablesByValue = {};
     for (const variable of variables) {

@@ -86,6 +86,45 @@ test('tokens maps computed values back to CSS variables', async () => {
   assert.equal(element.style.borderTopLeftRadius, '8px');
 });
 
+test('tokens resolves active body and component themes without using inactive declarations', async () => {
+  await page.evaluate(() => {
+    const style = document.createElement('style');
+    style.id = 'scope-token-style';
+    style.textContent = 'body.theme-dark { --color-primary: #112233; } .inactive-theme { --inactive-color: #abcdef; }';
+    document.head.append(style);
+    document.body.classList.add('theme-dark');
+    const scope = document.createElement('section');
+    scope.id = 'token-scope';
+    scope.style.cssText = '--color-primary: #445566; --inline-color: var(--color-primary); background: var(--inline-color);';
+    scope.textContent = 'Secret scoped content';
+    document.body.append(scope);
+  });
+  try {
+    const body = await page.evaluate(script('tokens.js'));
+    const find = (result, name) => result.variables.list.find((entry) => entry.name === name);
+    assert.equal(find(body, '--color-primary').color, 'rgb(17, 34, 51)');
+    assert.equal(find(body, '--inactive-color').resolved, '');
+    assert.equal(find(body, '--inactive-color').color, null);
+    const scoped = await page.evaluate(() => window.__re.tokens({ root: '#token-scope' }));
+    assert.equal(find(scoped, '--color-primary').color, 'rgb(68, 85, 102)');
+    assert.equal(find(scoped, '--inline-color').color, 'rgb(68, 85, 102)');
+    assert.ok(scoped.colors.find((entry) => entry.value === 'rgb(68, 85, 102)').variables.includes('--inline-color'));
+    await page.evaluate(() => document.body.classList.remove('theme-dark'));
+    const light = await page.evaluate(() => window.__re.tokens());
+    assert.equal(find(light, '--color-primary').color, 'rgb(123, 104, 238)');
+    for (const result of [body, scoped, light]) {
+      const output = JSON.stringify(result);
+      for (const secret of ['Secret scoped content', 'maria@cliente.com.br', 'Maria Souza']) assert.ok(!output.includes(secret));
+    }
+  } finally {
+    await page.evaluate(() => {
+      document.body.classList.remove('theme-dark');
+      document.getElementById('scope-token-style').remove();
+      document.getElementById('token-scope').remove();
+    });
+  }
+});
+
 test('api-shapes records endpoint templates and shapes without values', async () => {
   await page.evaluate(script('api-shapes.js'));
   await page.evaluate(() => window.__re.api.clear());
