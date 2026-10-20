@@ -184,6 +184,93 @@ test('mask rules cover elements rendered later, and placeholders', async () => {
   await page.evaluate(() => document.querySelectorAll('#owner, #later, .popover').forEach((element) => element.remove()));
 });
 
+test('mask watch covers new text, names, avatars and field edits and stops cleanly', async () => {
+  await page.evaluate(script('mask.js'));
+  try {
+    const result = await page.evaluate(() => {
+      window.__re.mask.clear();
+      return window.__re.mask.watch({ names: ['Private Watch Name'] });
+    });
+    assert.equal(result.watching, true);
+    assert.ok(!JSON.stringify(result).includes('Private Watch Name'));
+    await page.evaluate(() => {
+      const host = document.createElement('section');
+      host.id = 'watch-fixture';
+      host.innerHTML = '<p id="watch-email">initial</p><p id="watch-name">Private Watch Name</p><input id="watch-field"><img id="watch-avatar" class="avatar" width="32" height="32">';
+      document.body.append(host);
+      document.getElementById('watch-email').firstChild.nodeValue = 'synthetic@example.test';
+    });
+    await page.waitForFunction(() => ['watch-email', 'watch-name', 'watch-avatar'].every((id) => document.getElementById(id).classList.contains('__re-masked')));
+    await page.evaluate(() => {
+      const field = document.getElementById('watch-field');
+      field.value = 'synthetic@example.test';
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+      field.setAttribute('placeholder', 'synthetic@example.test');
+    });
+    await page.waitForFunction(() => document.getElementById('watch-field').classList.contains('__re-masked-placeholder'));
+    assert.equal(await page.locator('#watch-field').evaluate((field) => getComputedStyle(field).filter), 'blur(6px)');
+    const output = await page.evaluate(() => window.__re.last);
+    for (const secret of ['Private Watch Name', 'synthetic@example.test']) assert.ok(!JSON.stringify(output).includes(secret));
+    await page.evaluate(() => {
+      window.__re.mask.clear();
+      window.__re.mask.watch({ avatars: false });
+    });
+    assert.equal(await page.locator('#watch-avatar').evaluate((element) => element.classList.contains('__re-masked')), false);
+    await page.evaluate(() => {
+      window.__re.mask.clear();
+      const late = document.createElement('p');
+      late.id = 'watch-late';
+      late.textContent = 'later@example.test';
+      document.getElementById('watch-fixture').append(late);
+    });
+    // A browser task boundary lets any incorrectly retained observer run.
+    await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    assert.equal(await page.locator('#watch-late').evaluate((element) => element.classList.contains('__re-masked')), false);
+  } finally {
+    await page.evaluate(() => {
+      window.__re.mask.clear();
+      document.getElementById('watch-fixture')?.remove();
+    });
+  }
+});
+
+test('mask watch replacement, stop and reinstallation leave no stale observer', async () => {
+  await page.evaluate(script('mask.js'));
+  try {
+    await page.evaluate(() => {
+      window.__re.mask.clear();
+      window.__re.mask.watch({ names: ['Old private name'] });
+      window.__re.mask.watch({ names: ['New private name'] });
+      const host = document.createElement('section');
+      host.id = 'watch-lifecycle';
+      host.innerHTML = '<p id="old-name">Old private name</p><p id="new-name">New private name</p>';
+      document.body.append(host);
+    });
+    await page.waitForFunction(() => document.getElementById('new-name').classList.contains('__re-masked'));
+    assert.equal(await page.locator('#old-name').evaluate((element) => element.classList.contains('__re-masked')), false);
+    const stopped = await page.evaluate(() => window.__re.mask.stop());
+    assert.deepEqual(stopped, { watching: false });
+    assert.equal(await page.locator('#new-name').evaluate((element) => element.classList.contains('__re-masked')), true);
+    await page.evaluate(() => {
+      document.getElementById('old-name').textContent = 'New private name';
+    });
+    await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    assert.equal(await page.locator('#old-name').evaluate((element) => element.classList.contains('__re-masked')), false);
+    await page.evaluate(() => window.__re.mask.watch({ names: ['Reinstalled private name'] }));
+    await page.evaluate(script('mask.js'));
+    await page.evaluate(() => {
+      document.getElementById('old-name').textContent = 'Reinstalled private name';
+    });
+    await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    assert.equal(await page.locator('#old-name').evaluate((element) => element.classList.contains('__re-masked')), false);
+  } finally {
+    await page.evaluate(() => {
+      window.__re.mask.clear();
+      document.getElementById('watch-lifecycle')?.remove();
+    });
+  }
+});
+
 test('annotate outlines regions and reports missing selectors', async () => {
   await page.evaluate(script('annotate.js'));
   const result = await page.evaluate(() => window.__re.annotate(['header', 'main', '.missing']));

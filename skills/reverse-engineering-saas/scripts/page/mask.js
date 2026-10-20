@@ -1,11 +1,15 @@
 // mask.js: blurs personal data before a screenshot of a production screen.
 // Paste the whole file into the browser's JavaScript tool. It masks at once.
 //   window.__re.mask.apply({ selectors: ['.customer-name'], names: ['Maria Silva'], avatars: true, placeholders: true })
-//   window.__re.mask.clear()
+//   window.__re.mask.watch({ names: ['Maria Silva'] })  also mask later changes
+//   window.__re.mask.stop()   stop watching, keep existing masks
+//   window.__re.mask.clear()  stop watching and remove masks
 // Selectors and placeholders: true become CSS rules that also blur elements
 // rendered later (popovers, dropdowns, re-rendered lists) until clear().
 // Patterns, names and avatars mark the elements on the page now: run apply()
-// again right before each screenshot.
+// again right before each screenshot, or opt into watch(). Watching covers this
+// document's DOM mutations and input/change events, not frames, shadow roots or
+// programmatic field.value changes without an event. Review each screenshot.
 // Playwright browser_evaluate: wrap as () => { <file>; return window.__re.last; }
 (() => {
   const re = (window.__re = window.__re || {});
@@ -24,6 +28,13 @@
   };
   // Rules kept across apply() calls, and across pastes of this file before a reload.
   const rules = re.mask?.rules || { selectors: [], placeholders: false };
+  re.mask?.stop?.(); // Re-pasting must not leave an old observer running.
+  let observer = null;
+  let watchedOptions = null;
+  const observe = () => observer?.observe(document.body, {
+    subtree: true, childList: true, characterData: true, attributes: true,
+    attributeFilter: ['class', 'style', 'alt', 'src', 'width', 'height', 'placeholder', 'value'],
+  });
 
   const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -47,7 +58,8 @@
     const lines = [`.${CLASS}{${BLUR}}`, `.${PLACEHOLDER_CLASS}::placeholder{${BLUR_TEXT}}`];
     for (const selector of rules.selectors) lines.push(`${selector}{${BLUR}}`);
     if (rules.placeholders) lines.push(`input::placeholder,textarea::placeholder{${BLUR_TEXT}}`);
-    style.textContent = lines.join('\n');
+    const css = lines.join('\n');
+    if (style.textContent !== css) style.textContent = css;
   }
 
   function apply(options = {}) {
@@ -103,7 +115,40 @@
     return result;
   }
 
+  function refresh(event) {
+    if (!observer || (event?.type === 'load' && event.target?.tagName !== 'IMG')) return;
+    // A single synchronous scan per mutation batch. Do not observe our own marks.
+    observer.disconnect();
+    try {
+      re.last = { ...apply(watchedOptions), watching: true };
+    } finally {
+      observe();
+    }
+  }
+
+  function stop() {
+    observer?.disconnect();
+    observer = null;
+    watchedOptions = null;
+    for (const event of ['input', 'change', 'load']) document.removeEventListener(event, refresh, true);
+    return { watching: false };
+  }
+
+  function watch(options = {}) {
+    stop();
+    // Copy arrays so later caller changes cannot silently change the watch rules.
+    const snapshot = { ...options, names: [...(options.names || [])], selectors: [...(options.selectors || [])] };
+    const result = apply(snapshot);
+    watchedOptions = snapshot;
+    observer = new MutationObserver(refresh);
+    observe();
+    for (const event of ['input', 'change', 'load']) document.addEventListener(event, refresh, true);
+    re.last = { ...result, watching: true };
+    return re.last;
+  }
+
   function clear() {
+    stop();
     for (const element of document.querySelectorAll(`.${CLASS}, .${PLACEHOLDER_CLASS}`)) element.classList.remove(CLASS, PLACEHOLDER_CLASS);
     document.getElementById(STYLE_ID)?.remove();
     rules.selectors = [];
@@ -112,6 +157,6 @@
     return re.last;
   }
 
-  re.mask = { apply, clear, rules };
+  re.mask = { apply, watch, stop, clear, rules };
   return apply();
 })();
