@@ -130,6 +130,35 @@ test('barriers need evidence and are counted as BR IDs', () => {
   assert.match(check('--next').stdout, /BR-002/);
 });
 
+test('findings need evidence', () => {
+  const header = '\n| ID | Finding | Severity | Where | Evidence |\n|---|---|---|---|---|\n';
+  appendFileSync(join(kb, 'findings.md'), `${header}| B-001 | Save view is lost on reload | Medium | Board | |\n`);
+  let result = check();
+  assert.equal(result.status, 1);
+  assert.match(result.stdout, /findings\.md: B-001 has no evidence tag/);
+  write('findings.md', `# Findings\n${header}| B-001 | Save view is lost on reload | Medium | Board | [inf] Q-001 |\n`);
+  appendFileSync(join(kb, 'questions.md'), '| Q-001 | Does it persist? | Matters | Reload | open |\n');
+  result = check();
+  assert.equal(result.status, 0, result.stdout);
+  assert.match(result.stdout, /findings\.md: B-001 rests on inference only/);
+  write('findings.md', `# Findings\n${header}| B-001 | Save view is lost on reload | Medium | Board | [obs EV-001] |\n`);
+  appendFileSync(join(kb, 'evidence/index.csv'), 'EV-001,2026-10-15,s01,/board,Board,yes\n');
+  write('evidence/EV-001-board.md', 'Board\n');
+  result = check();
+  assert.equal(result.status, 0, result.stdout);
+  assert.doesNotMatch(result.stdout, /B-001/);
+});
+
+test('a finding is checked with its row and heading together, never with Strengths', () => {
+  write('evidence/EV-001-board.md', 'Board\n');
+  appendFileSync(join(kb, 'evidence/index.csv'), 'EV-001,2026-10-15,s01,/board,Board,yes\n');
+  write('findings.md', '# Findings\n\n| ID | Finding | Severity | Where | Evidence |\n|---|---|---|---|---|\n| B-001 | Lost on reload | Medium | Board | see below |\n\n### B-001 Lost on reload\n- Steps: reload the board [obs EV-001]\n\n### B-002 Escape closes the task\n- Steps: press Escape\n\n## Strengths\n\n- Undo after complete [obs EV-001]\n');
+  const result = check();
+  assert.equal(result.status, 1);
+  assert.doesNotMatch(result.stdout, /B-001 has no evidence tag/);
+  assert.match(result.stdout, /findings\.md: B-002 has no evidence tag/);
+});
+
 test('entity field rows need an evidence tag', () => {
   write('data-model/entities/E-001-deal.md', '# E-001 Deal\n\n## Fields\n\n| Field | Type | Required | Default | Constraints or enum | Source |\n|---|---|---|---|---|---|\n| title | string | yes | | | [doc SRC-001] |\n| value | number | no | 0 | | |\n\n## Not tested\n- None.\n');
   appendFileSync(join(kb, 'sources.md'), '| SRC-001 | API | https://example.com/api | api | 2026-10-15 | fields |\n');

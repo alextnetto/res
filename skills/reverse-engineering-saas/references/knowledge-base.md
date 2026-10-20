@@ -146,7 +146,7 @@ Send the zip to the user in the chat. The receiver unzips it and gives the folde
 
 `node <skill>/scripts/check-kb.mjs <kb>` reports:
 
-- Errors: unresolved references, duplicate definitions, rules or barriers without evidence, invalid ledger rows, `fixture`, `kept`, `human` or `incident` rows without a note, missing `STATUS.md`; with `--closing`, an unfilled charter.
+- Errors: unresolved references, duplicate definitions, rules, barriers or findings without evidence, invalid ledger rows, `fixture`, `kept`, `human` or `incident` rows without a note, missing `STATUS.md`; with `--closing`, an unfilled charter.
 - Warnings: open ledger rows, `[inf]` lines without `Q-###`, features without a coverage row, artifact files without a "Not tested" section, entity field rows without an evidence tag, evidence files missing from `evidence/index.csv`, `STATUS.md` older than the newest log, template placeholders left in place.
 
 Add `--closing` at the end of the study: `open`, `fixture` and `human` ledger rows become errors.
