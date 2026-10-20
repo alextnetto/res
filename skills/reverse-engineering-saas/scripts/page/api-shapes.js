@@ -77,7 +77,15 @@
 
   const typeOf = (value) => (value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value);
 
-  // Shape: primitives become "string<iso-date>", objects keep keys, arrays merge their first items.
+  // Redact recognizable record IDs, including IDs embedded in map keys. Ordinary
+  // schema fields such as oauth2 and sha256 remain useful. This is a heuristic;
+  // arbitrary names or opaque alphabetic keys cannot be classified reliably.
+  const shapeKey = (key) =>
+    /^\d+$/.test(key) || /\d{4,}/.test(key) ||
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(key)
+      ? ':id' : key;
+
+  // Shape: primitives become "string<iso-date>", objects redact ID keys, arrays merge their first items.
   const shapeOf = (value, depth = 0, path = '', enums = null) => {
     const type = typeOf(value);
     if (type === 'array') {
@@ -87,15 +95,17 @@
     }
     if (type === 'object') {
       if (depth >= MAX_DEPTH) return '{…}';
-      const out = {};
+      const out = Object.create(null);
       const keys = Object.keys(value);
       for (const key of keys.slice(0, MAX_KEYS)) {
         const child = value[key];
+        const safeKey = shapeKey(key);
+        const childPath = `${path}.${safeKey}`;
         if (enums && re.api?.enumSamples !== false && typeof child === 'string' && ENUM_KEY.test(key) && looksLikeEnum(child)) {
-          const set = (enums[`${path}.${key}`] = enums[`${path}.${key}`] || new Set());
+          const set = (enums[childPath] = enums[childPath] || new Set());
           if (set.size < MAX_ENUM_VALUES) set.add(child);
         }
-        out[key] = shapeOf(child, depth + 1, `${path}.${key}`, enums);
+        out[safeKey] = mergeShapes(out[safeKey], shapeOf(child, depth + 1, childPath, enums));
       }
       if (keys.length > MAX_KEYS) out['…'] = `${keys.length - MAX_KEYS} more keys`;
       return out;
@@ -112,8 +122,8 @@
     }
     if (Array.isArray(a) && Array.isArray(b)) return a.length && b.length ? [mergeShapes(a[0], b[0])] : a.length ? a : b;
     if (a && b && typeof a === 'object' && typeof b === 'object' && !Array.isArray(a) && !Array.isArray(b)) {
-      const out = { ...a };
-      for (const key of Object.keys(b)) out[key] = key in a ? mergeShapes(a[key], b[key]) : b[key];
+      const out = Object.assign(Object.create(null), a);
+      for (const key of Object.keys(b)) out[key] = Object.hasOwn(a, key) ? mergeShapes(a[key], b[key]) : b[key];
       return out;
     }
     return 'mixed';

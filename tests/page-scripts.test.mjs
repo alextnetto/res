@@ -195,3 +195,35 @@ test('annotate outlines regions and reports missing selectors', async () => {
   await page.evaluate(() => window.__re.annotate.clear());
   assert.equal(await page.evaluate(() => document.getElementById('__re-annotate')), null);
 });
+
+
+test('api-shapes redacts record keys and merges their shapes and enum paths', async () => {
+  const ids = ['900000000001', '86abc1234', '123e4567-e89b-12d3-a456-426614174000', 'workspace_900000000002'];
+  const payload = {
+    records: Object.fromEntries(ids.map((id, index) => [id, { status: index ? 'done' : 'open', value: index ? 1 : 'private value' }])),
+    sha256: 'private digest', oauth2: true,
+  };
+  await page.route('http://fixture.test/key-map', (route) => route.fulfill({ json: payload }));
+  await page.evaluate(script('api-shapes.js'));
+  try {
+    await page.evaluate(async (body) => {
+      window.__re.api.clear();
+      await fetch('/key-map', { method: 'POST', body: JSON.stringify(body) });
+    }, payload);
+    await page.waitForFunction(() => window.__re.api.count() === 1);
+    const [entry] = await page.evaluate(() => window.__re.api.dump());
+    for (const shape of [entry.request, entry.response]) {
+      assert.deepEqual(Object.keys(shape.records), [':id']);
+      assert.equal(shape.records[':id'].value, 'number|string');
+      assert.equal(shape.sha256, 'string');
+      assert.equal(shape.oauth2, 'boolean');
+    }
+    assert.deepEqual(entry.enumSamples['response.records.:id.status'].sort(), ['done', 'open']);
+    assert.deepEqual(entry.enumSamples['request.records.:id.status'].sort(), ['done', 'open']);
+    const output = JSON.stringify(entry);
+    for (const secret of [...ids, 'private value', 'private digest']) assert.ok(!output.includes(secret), `leaked ${secret}`);
+  } finally {
+    await page.evaluate(() => window.__re.api.uninstall());
+    await page.unroute('http://fixture.test/key-map');
+  }
+});
