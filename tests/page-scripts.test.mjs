@@ -131,6 +131,43 @@ test('api-shapes records endpoint templates and shapes without values', async ()
   assert.equal(await page.evaluate(() => window.__re.api), undefined);
 });
 
+test('versioned route segments stay distinct while record IDs are redacted', async () => {
+  await page.evaluate(script('api-shapes.js'));
+  await page.evaluate(() => window.__re.api.clear());
+  const paths = [
+    '/api/task-v3/86abc1234',
+    '/api/task-v4/86abc9999',
+    '/api/custom-fields-v12/123456789',
+    '/api/v2/123e4567-e89b-12d3-a456-426614174000',
+    '/api/tasks/record-123456',
+  ];
+  try {
+    await page.evaluate(async (urls) => {
+      for (const url of urls) await fetch(url);
+      const links = document.createElement('div');
+      links.id = 'versioned-routes';
+      for (const url of urls) {
+        const link = document.createElement('a');
+        link.href = url;
+        links.append(link);
+      }
+      document.body.append(links);
+    }, paths);
+    await page.waitForFunction(() => window.__re.api.dump().reduce((count, entry) => count + entry.count, 0) === 5);
+    const entries = await page.evaluate(() => window.__re.api.dump());
+    const expected = ['/api/task-v3/:id', '/api/task-v4/:id', '/api/custom-fields-v12/:id', '/api/v2/:id', '/api/tasks/:id'];
+    assert.deepEqual(entries.map((entry) => entry.url).sort(), [...expected].sort());
+    const inventory = await page.evaluate(script('inventory.js'));
+    for (const route of expected) assert.ok(inventory.routes.some((entry) => entry.name === route), route);
+    const output = JSON.stringify({ entries, inventory });
+    for (const path of paths) assert.ok(!output.includes(path.split('/').at(-1)), `ID leaked from ${path}`);
+  } finally {
+    await page.evaluate(() => {
+      window.__re.api.uninstall();
+      document.getElementById('versioned-routes')?.remove();
+    });
+  }
+});
 test('mask blurs personal data and clear removes it', async () => {
   const result = await page.evaluate(script('mask.js'));
   assert.ok(result.byReason.email >= 1);

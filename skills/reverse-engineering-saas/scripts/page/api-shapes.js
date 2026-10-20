@@ -41,6 +41,7 @@
         if (!segment) return segment;
         if (/^\d+$/.test(segment)) return ':id';
         if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(segment)) return ':id';
+        if (/^[a-z]+(?:-[a-z]+)*-v\d+$/i.test(segment)) return segment;
         if (/\d/.test(segment) && segment.length >= 6 && /^[\w-]+$/.test(segment)) return ':id';
         return segment;
       })
