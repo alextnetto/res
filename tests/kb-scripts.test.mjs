@@ -367,3 +367,17 @@ test('--next prints the next free ID per prefix', () => {
   assert.match(result.stdout, /EV-013/);
   assert.match(result.stdout, /R-001/);
 });
+
+test('build-report reads files with Windows line endings', () => {
+  const crlf = (text) => text.replace(/\n/g, '\r\n');
+  write('rules/board.md', crlf('# Rules: board\n\n### R-001 Cards keep their order\n- Given a board with two cards\n- When the page reloads\n- Then the cards keep their order\n- Evidence: [doc SRC-001]\n'));
+  write('screens/S-001-board.md', crlf('# S-001 Board\nRules: R-001\n\n## Not tested\n- Drag.\n'));
+  appendFileSync(join(kb, 'sources.md'), '| SRC-001 | Docs | https://example.com/docs | docs | 2026-10-16 | x |\r\n');
+  const result = run('build-report.mjs', kb);
+  assert.equal(result.status, 0, result.stderr);
+  const html = readFileSync(join(kb, 'REPORT.html'), 'utf8');
+  assert.match(html, /id="R-001"/);
+  assert.match(html, /Cards keep their order/);
+  assert.match(html, /the cards keep their order/);
+  assert.doesNotMatch(html, /\r/, 'no carriage returns reach the page');
+});
