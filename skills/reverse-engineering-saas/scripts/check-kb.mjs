@@ -4,6 +4,7 @@
 // Exit code 1 when there are errors, 2 on bad usage.
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const USAGE = 'Usage: node check-kb.mjs <kb-dir> [--closing] [--next] [--help]';
 const ID_PATTERN = /\b(FL|SRC|EV|BR|F|S|C|R|E|B|Q|L)-(\d{3})\b/g;
@@ -40,13 +41,18 @@ let closingRun = false;
 const warnings = [];
 const definitions = new Map();
 
+// Normalize path separators to POSIX so comparisons against the '/'-based tables
+// (FILE_ID_DIRS, HEADING_ID_FILES, EVIDENCE_INDEX and the 'rules/' prefix) also
+// hold on Windows, where relative() returns backslashes.
+export const toPosix = (p) => p.replaceAll('\\', '/');
+
 function walk(dir, root = dir) {
   const files = [];
   for (const entry of readdirSync(dir)) {
     if (SKIP_DIRS.has(entry)) continue;
     const full = join(dir, entry);
     if (statSync(full).isDirectory()) files.push(...walk(full, root));
-    else files.push(relative(root, full));
+    else files.push(toPosix(relative(root, full)));
   }
   return files;
 }
@@ -372,4 +378,4 @@ function main() {
   process.exitCode = errors.length ? 1 : 0;
 }
 
-main();
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();

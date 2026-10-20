@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- `check-kb.mjs`: normalize path separators to POSIX so a knowledge base validates on Windows. `walk()` used `relative()`, which returns backslashes on Windows, but definitions are keyed to `/`-based tables (`FILE_ID_DIRS` such as `data-model/entities`, the `rules/` prefix, `evidence/index.csv`). Without normalization every nested heading/filename definition went unregistered on Windows, so every `E-`/`R-` reference was reported as "referenced but not defined" and `evidence/index.csv` drew a spurious naming warning. Added an importable `toPosix` helper (with an entry guard matching `build-report.mjs`) and a unit test.
+
 ## 0.4.0 (2026-10-17)
 
 - `REPORT.html` redesigned as a UX study a person can read and navigate: IBM Plex type, a light and a dark theme with a toggle, a one-line answer with the key findings, stat tiles, section chips, and screenshots in framed figures that enlarge on click.

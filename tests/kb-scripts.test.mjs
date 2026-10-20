@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { toPosix } from '../skills/reverse-engineering-saas/scripts/check-kb.mjs';
 
 const scripts = join(dirname(fileURLToPath(import.meta.url)), '..', 'skills', 'reverse-engineering-saas', 'scripts');
 const run = (name, ...args) => spawnSync(process.execPath, [join(scripts, name), ...args], { encoding: 'utf8' });
@@ -24,6 +25,17 @@ afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 const write = (path, text) => writeFileSync(join(kb, path), text);
 const check = (...args) => run('check-kb.mjs', kb, ...args);
+
+// Regression for the Windows path-separator bug: walk() used relative(), which
+// yields backslashes on Windows, but definitions are keyed to '/'-based tables
+// (FILE_ID_DIRS like 'data-model/entities', the 'rules/' prefix, EVIDENCE_INDEX).
+// Without normalization every nested heading/filename definition went unregistered
+// on Windows, so every E-/R- reference was flagged "referenced but not defined".
+test('toPosix normalizes separators so nested IDs resolve on every platform', () => {
+  assert.equal(toPosix('data-model\\entities\\E-002-x.md'), 'data-model/entities/E-002-x.md');
+  assert.equal(toPosix('rules\\atendimento.md'), 'rules/atendimento.md');
+  assert.equal(toPosix('evidence/index.csv'), 'evidence/index.csv');
+});
 
 test('init creates the tree, fills product and date, copies artifact templates', () => {
   for (const path of ['STATUS.md', 'sandbox/ledger.csv', 'inventory/coverage.md', '_templates/screen.md', 'evidence/index.csv']) {
