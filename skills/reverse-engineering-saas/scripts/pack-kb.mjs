@@ -142,7 +142,7 @@ const csvCell = (cell) => (/[",\r\n]/.test(cell) ? `"${cell.replaceAll('"', '""'
 
 // The ledger as the zip holds it: object IDs and locations blanked, URLs replaced.
 function sanitizedLedger(path) {
-  const [header = [], ...rows] = parseCsv(readFileSync(path, 'utf8'));
+  const [header = [], ...rows] = parseCsv(readFileSync(path, 'utf8').replace(/\r\n?/g, '\n'));
   const blank = new Set(LEDGER_PRIVATE_COLUMNS.map((column) => header.indexOf(column)).filter((index) => index >= 0));
   const clean = rows.map((cells) => cells.map((cell, index) => (blank.has(index) ? '' : cell.replace(/\b(?:https?|wss?):\/\/[^\s",]+/gi, '[url]'))));
   return Buffer.from(`${[header, ...clean].map((cells) => cells.map(csvCell).join(',')).join('\n')}\n`);
