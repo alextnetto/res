@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Windows: `check-kb.mjs` compares KB paths with forward slashes, so rules, features and other definitions are found when `path.relative` returns backslashes. `check-kb.mjs`, `build-report.mjs` and `pack-kb.mjs` read files with CRLF line endings as LF, so a KB saved by Windows tools validates and renders. A new test covers CRLF files.
+
 ## 0.4.0 (2026-10-17)
 
 - `REPORT.html` redesigned as a UX study a person can read and navigate: IBM Plex type, a light and a dark theme with a toggle, a one-line answer with the key findings, stat tiles, section chips, and screenshots in framed figures that enlarge on click.

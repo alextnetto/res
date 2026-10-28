@@ -367,3 +367,16 @@ test('--next prints the next free ID per prefix', () => {
   assert.match(result.stdout, /EV-013/);
   assert.match(result.stdout, /R-001/);
 });
+
+test('check-kb and build-report accept files with CRLF line endings', () => {
+  const crlf = (text) => text.replace(/\n/g, '\r\n');
+  writeFileSync(join(kb, 'evidence/EV-001-deal-won.png'), 'png');
+  appendFileSync(join(kb, 'evidence/index.csv'), crlf('EV-001,2026-10-15,s01,/deal/:id,won deal,yes\n'));
+  write('rules/deals.md', crlf('# Rules: deals\n\n### R-001 Won deals leave the board\n- Given a deal\n- When won\n- Then hidden\n- Evidence: [obs EV-001]\n'));
+  const result = check();
+  assert.equal(result.status, 0, result.stdout);
+  assert.doesNotMatch(result.stdout, /R-001 has no evidence tag/);
+  const report = run('build-report.mjs', kb);
+  assert.equal(report.status, 0, report.stderr);
+  assert.match(readFileSync(join(kb, 'REPORT.html'), 'utf8'), /Won deals leave the board/);
+});
