@@ -6,7 +6,7 @@
 // check-kb and shows how the study left the product. No dependencies.
 import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { basename, dirname, join, relative, resolve } from 'node:path';
+import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { deflateRawSync } from 'node:zlib';
 import { buildReport } from './build-report.mjs';
@@ -97,7 +97,7 @@ function walk(dir, root, skipDirs) {
   for (const entry of readdirSync(dir).sort()) {
     if (ALWAYS_SKIP.has(entry)) continue;
     const full = join(dir, entry);
-    const rel = relative(root, full);
+    const rel = relative(root, full).split(sep).join('/');
     if (statSync(full).isDirectory()) {
       if (!skipDirs.includes(rel)) files.push(...walk(full, root, skipDirs));
     } else {
@@ -142,7 +142,7 @@ const csvCell = (cell) => (/[",\r\n]/.test(cell) ? `"${cell.replaceAll('"', '""'
 
 // The ledger as the zip holds it: object IDs and locations blanked, URLs replaced.
 function sanitizedLedger(path) {
-  const [header = [], ...rows] = parseCsv(readFileSync(path, 'utf8'));
+  const [header = [], ...rows] = parseCsv(readFileSync(path, 'utf8').replace(/\r\n?/g, '\n'));
   const blank = new Set(LEDGER_PRIVATE_COLUMNS.map((column) => header.indexOf(column)).filter((index) => index >= 0));
   const clean = rows.map((cells) => cells.map((cell, index) => (blank.has(index) ? '' : cell.replace(/\b(?:https?|wss?):\/\/[^\s",]+/gi, '[url]'))));
   return Buffer.from(`${[header, ...clean].map((cells) => cells.map(csvCell).join(',')).join('\n')}\n`);
@@ -204,7 +204,7 @@ function main() {
 
   const skipped = options.full ? [] : PRIVATE_DIRS.filter((dir) => existsSync(join(kb, dir)));
   const folder = basename(kb);
-  const entries = walk(kb, kb, skipped).map((file) => ({ name: `${folder}/${file.split('\\').join('/')}`, data: readFileSync(join(kb, file)) }));
+  const entries = walk(kb, kb, skipped).map((file) => ({ name: `${folder}/${file}`, data: readFileSync(join(kb, file)) }));
   const ledger = skipped.includes('sandbox') && existsSync(join(kb, LEDGER));
   if (ledger) entries.push({ name: `${folder}/${LEDGER}`, data: sanitizedLedger(join(kb, LEDGER)) });
   const zip = buildZip(entries);

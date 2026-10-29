@@ -18,7 +18,8 @@ const UNSEEN = /^\s*(not tested|not measured|not reached|not studied|not seen|no
 const GALLERY_LIMIT = 6;
 
 const escapeHtml = (text) => String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-const read = (kb, file) => (existsSync(join(kb, file)) ? readFileSync(join(kb, file), 'utf8') : '');
+// Files saved on Windows end lines with CRLF; the parsers expect LF.
+const read = (kb, file) => (existsSync(join(kb, file)) ? readFileSync(join(kb, file), 'utf8').replace(/\r\n?/g, '\n') : '');
 // A comment on its own line goes with its line, so tables around it stay intact.
 const stripComments = (text) => text.replace(/^[ \t]*<!--[\s\S]*?-->[ \t]*\r?\n/gm, '').replace(/<!--[\s\S]*?-->/g, '');
 const listDir = (kb, dir, filter = () => true) =>

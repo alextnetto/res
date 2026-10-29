@@ -3,7 +3,7 @@
 // evidence tags, the change ledger and STATUS.md.
 // Exit code 1 when there are errors, 2 on bad usage.
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { dirname, join, relative, resolve } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 
 const USAGE = 'Usage: node check-kb.mjs <kb-dir> [--closing] [--next] [--help]';
 const ID_PATTERN = /\b(FL|SRC|EV|BR|F|S|C|R|E|B|Q|L)-(\d{3})\b/g;
@@ -35,6 +35,9 @@ const ROW_ID_FILES = {
 const HEADING_ID_FILES = { 'findings.md': ['B'], 'questions.md': ['Q'], 'clone/barriers.md': ['BR'] };
 const ARTIFACT_DIRS = ['screens', 'components', 'flows', 'topics'];
 
+// Files saved on Windows end lines with CRLF and relative() returns backslashes; the checks expect LF and "/".
+const readText = (path) => readFileSync(path, 'utf8').replace(/\r\n?/g, '\n');
+
 const errors = [];
 let closingRun = false;
 const warnings = [];
@@ -46,7 +49,7 @@ function walk(dir, root = dir) {
     if (SKIP_DIRS.has(entry)) continue;
     const full = join(dir, entry);
     if (statSync(full).isDirectory()) files.push(...walk(full, root));
-    else files.push(relative(root, full));
+    else files.push(relative(root, full).split(sep).join('/'));
   }
   return files;
 }
@@ -110,7 +113,7 @@ function collectDefinitions(kb, files) {
   }
   const markdownFiles = files.filter((file) => file.endsWith('.md'));
   for (const file of markdownFiles) {
-    const lines = stripIgnored(readFileSync(join(kb, file), 'utf8')).split('\n');
+    const lines = stripIgnored(readText(join(kb, file))).split('\n');
     const rowPrefixes = ROW_ID_FILES[file] ?? [];
     const headingPrefixes = file.startsWith('rules/') ? ['R'] : HEADING_ID_FILES[file] ?? [];
     lines.forEach((line, index) => {
@@ -137,7 +140,7 @@ function checkDuplicates() {
 
 function checkReferencesAndLinks(kb, files) {
   for (const file of files.filter((name) => SCANNED_EXTENSIONS.has(extensionOf(name)))) {
-    const text = stripIgnored(readFileSync(join(kb, file), 'utf8'));
+    const text = stripIgnored(readText(join(kb, file)));
     const lines = text.split('\n');
     lines.forEach((line, index) => {
       const where = `${file}:${index + 1}`;
@@ -174,7 +177,7 @@ function checkEvidenceSections(kb, files) {
     ...files.filter((name) => name === 'clone/barriers.md').map((file) => [file, 'BR']),
   ];
   for (const [file, prefix] of targets) {
-    const text = stripIgnored(readFileSync(join(kb, file), 'utf8'));
+    const text = stripIgnored(readText(join(kb, file)));
     const start = new RegExp(`^(?=#{1,6}\\s+${prefix}-\\d{3}\\b)`, 'm');
     const sections = text.split(start).filter((section) => new RegExp(`^#{1,6}\\s+${prefix}-\\d{3}`).test(section));
     for (const section of sections) {
@@ -189,7 +192,7 @@ function checkEvidenceSections(kb, files) {
 function checkArtifacts(files, kb) {
   for (const file of files) {
     if (!file.endsWith('.md') || !ARTIFACT_DIRS.includes(dirname(file))) continue;
-    if (!/^##\s+Not tested\b/m.test(readFileSync(join(kb, file), 'utf8'))) warnings.push(`${file}: no "## Not tested" section`);
+    if (!/^##\s+Not tested\b/m.test(readText(join(kb, file)))) warnings.push(`${file}: no "## Not tested" section`);
   }
 }
 
@@ -199,7 +202,7 @@ function checkLedger(kb, closing) {
     errors.push('sandbox/ledger.csv is missing');
     return { rows: 0, open: 0 };
   }
-  const [header = [], ...rows] = parseCsv(readFileSync(path, 'utf8'));
+  const [header = [], ...rows] = parseCsv(readText(path));
   if (header.join(',') !== LEDGER_COLUMNS.join(',')) {
     errors.push(`sandbox/ledger.csv: header must be ${LEDGER_COLUMNS.join(',')}`);
     return { rows: rows.length, open: 0 };
@@ -231,7 +234,7 @@ function checkStatus(kb, files, ledger) {
     errors.push('STATUS.md is missing');
     return;
   }
-  const text = readFileSync(path, 'utf8');
+  const text = readText(path);
   const updated = text.match(/^Updated:\s*(\d{4}-\d{2}-\d{2})/m);
   if (!updated) warnings.push('STATUS.md: no "Updated: YYYY-MM-DD" line');
   for (const section of ['Summary', 'Next actions', 'Needs human', 'Blocked']) {
@@ -255,7 +258,7 @@ function checkEvidenceIndex(kb, files) {
     if (evidence.length) warnings.push(`${EVIDENCE_INDEX} is missing`);
     return;
   }
-  const [, ...rows] = parseCsv(readFileSync(path, 'utf8'));
+  const [, ...rows] = parseCsv(readText(path));
   const indexed = new Set(rows.map((cells) => (cells[0] ?? '').trim()));
   for (const file of evidence) {
     const id = file.match(/EV-\d{3}/)[0];
@@ -270,7 +273,7 @@ function checkEvidenceIndex(kb, files) {
 function checkEntities(kb, files) {
   for (const file of files.filter((name) => name.startsWith('data-model/entities/') && name.endsWith('.md'))) {
     let section = '';
-    stripIgnored(readFileSync(join(kb, file), 'utf8'))
+    stripIgnored(readText(join(kb, file)))
       .split('\n')
       .forEach((line, index) => {
         const heading = line.match(/^##\s+(.+)/);
@@ -286,7 +289,7 @@ function checkEntities(kb, files) {
 function checkCoverageRows(kb) {
   const path = join(kb, 'inventory', 'coverage.md');
   if (!existsSync(path)) return;
-  const covered = new Set(stripIgnored(readFileSync(path, 'utf8')).match(/^\|\s*F-\d{3}/gm)?.map((cell) => cell.replace(/^\|\s*/, '')) ?? []);
+  const covered = new Set(stripIgnored(readText(path)).match(/^\|\s*F-\d{3}/gm)?.map((cell) => cell.replace(/^\|\s*/, '')) ?? []);
   for (const [id, places] of definitions) {
     if (id.startsWith('F-') && places.some((place) => place.file === 'inventory/features.md') && !covered.has(id)) {
       warnings.push(`inventory/coverage.md: ${id} has no row`);
@@ -298,7 +301,7 @@ function coverageSummary(kb) {
   const path = join(kb, 'inventory', 'coverage.md');
   const counts = Object.fromEntries([...COVERAGE_VALUES].map((value) => [value, 0]));
   if (!existsSync(path)) return counts;
-  stripIgnored(readFileSync(path, 'utf8'))
+  stripIgnored(readText(path))
     .split('\n')
     .forEach((line, index) => {
       if (!/^\|\s*F-\d{3}\b/.test(line)) return;

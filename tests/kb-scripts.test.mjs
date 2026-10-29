@@ -1,7 +1,7 @@
 // Tests for init-kb.mjs and check-kb.mjs. No dependencies.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
@@ -156,7 +156,7 @@ test('--git creates a repository for the KB even inside another repository', () 
 test('--git without a git identity still creates the repository', () => {
   const target = join(dir, 're-no-identity');
   const empty = join(dir, 'empty-home');
-  spawnSync('mkdir', ['-p', empty]);
+  mkdirSync(empty, { recursive: true });
   // useConfigOnly stops git from guessing an identity from the OS user, as on CI runners.
   const env = { ...process.env, HOME: empty, XDG_CONFIG_HOME: empty, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'user.useConfigOnly', GIT_CONFIG_VALUE_0: 'true' };
   for (const key of ['GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL', 'EMAIL']) delete env[key];
@@ -216,9 +216,13 @@ test('init-kb defaults to ./re-<product-slug>', () => {
 });
 
 // Lists and verifies a zip with Python's zipfile, an independent implementation.
+// "python3" is a Microsoft Store stub on Windows: use the first interpreter that actually runs.
+const python = ['python3', 'python', 'py'].find((command) => spawnSync(command, ['-c', 'import zipfile'], { encoding: 'utf8' }).status === 0);
+
 const readZip = (file) => {
+  assert.ok(python, 'Python 3 is needed to verify zips with an independent implementation');
   const code = 'import json,sys,zipfile\nz=zipfile.ZipFile(sys.argv[1])\nprint(json.dumps({"bad": z.testzip(), "names": z.namelist(), "build": z.read([n for n in z.namelist() if n.endswith("/BUILD.md")][0]).decode()}))';
-  const result = spawnSync('python3', ['-c', code, file], { encoding: 'utf8' });
+  const result = spawnSync(python, ['-c', code, file], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
   return JSON.parse(result.stdout);
 };
@@ -255,7 +259,7 @@ test('an unzipped handoff passes check-kb --closing; its ledger has no IDs, loca
   assert.equal(packed.status, 0, packed.stdout + packed.stderr);
   assert.match(packed.stdout, /Kept sandbox\/ledger\.csv without object IDs/);
   const target = join(dir, 'unzipped');
-  const unzip = spawnSync('python3', ['-c', 'import sys,zipfile\nzipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])', out, target], { encoding: 'utf8' });
+  const unzip = spawnSync(python, ['-c', 'import sys,zipfile\nzipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])', out, target], { encoding: 'utf8' });
   assert.equal(unzip.status, 0, unzip.stderr);
 
   const ledger = readFileSync(join(target, 're-acme', 'sandbox', 'ledger.csv'), 'utf8');
@@ -366,4 +370,29 @@ test('--next prints the next free ID per prefix', () => {
   assert.match(result.stdout, /F-008/);
   assert.match(result.stdout, /EV-013/);
   assert.match(result.stdout, /R-001/);
+});
+
+test('check-kb and build-report accept files with CRLF line endings', () => {
+  const crlf = (text) => text.replace(/\n/g, '\r\n');
+  writeFileSync(join(kb, 'evidence/EV-001-deal-won.png'), 'png');
+  appendFileSync(join(kb, 'evidence/index.csv'), crlf('EV-001,2026-10-15,s01,/deal/:id,won deal,yes\n'));
+  write('rules/deals.md', crlf('# Rules: deals\n\n### R-001 Won deals leave the board\n- Given a deal\n- When won\n- Then hidden\n- Evidence: [obs EV-001]\n'));
+  const result = check();
+  assert.equal(result.status, 0, result.stdout);
+  assert.doesNotMatch(result.stdout, /R-001 has no evidence tag/);
+  const report = run('build-report.mjs', kb);
+  assert.equal(report.status, 0, report.stderr);
+  assert.match(readFileSync(join(kb, 'REPORT.html'), 'utf8'), /Won deals leave the board/);
+});
+
+test('pack-kb keeps a CRLF ledger readable and writes zip entries with forward slashes', () => {
+  write('sandbox/ledger.csv', 'id,time,class,action,object,location,object_id,before,undo,status,note\r\nL-001,2026-10-16T10:00:00Z,A2,create,task,Acme > Sandbox,4471,,Delete it at https://acme.example.com/deal/4471,removed,ok\r\n');
+  appendFileSync(join(kb, 'STATUS.md'), '- L-001 removed and verified.\n');
+  const out = join(dir, 'crlf.zip');
+  const packed = run('pack-kb.mjs', kb, '--out', out);
+  assert.equal(packed.status, 0, packed.stdout + packed.stderr);
+  const zip = readZip(out);
+  assert.ok(zip.names.every((name) => !name.includes('\\')), 'zip entry names use forward slashes');
+  assert.ok(zip.names.includes('re-acme/clone/prd.md'));
+  assert.ok(zip.names.includes('re-acme/sandbox/ledger.csv'));
 });
